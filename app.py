@@ -1,8 +1,7 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
-from sklearn.ensemble import IsolationForest
 import joblib
+from sklearn.ensemble import IsolationForest
 
 # Set page configuration for a better look and feel
 st.set_page_config(
@@ -17,7 +16,7 @@ st.markdown("### Predict equipment faults based on sensor readings")
 st.markdown(
     """
 This application uses a trained Isolation Forest model to predict if an equipment reading is anomalous.
-Enter the sensor data below to get a prediction.
+Select the equipment location and type, and then enter the sensor data below to get a prediction.
 """
 )
 
@@ -29,8 +28,6 @@ def load_model_and_data():
     """
     try:
         model = joblib.load("isolation_forest_model.joblib")
-        # For simplicity, we'll retrain the model with the same data if it's not present.
-        # In a real-world scenario, you would have a separate training script.
         df = pd.read_csv("equipment_anomaly_data.csv")
     except FileNotFoundError:
         st.error("Error: `isolation_forest_model.joblib` or `equipment_anomaly_data.csv` not found.")
@@ -38,6 +35,8 @@ def load_model_and_data():
         try:
             df = pd.read_csv("equipment_anomaly_data.csv")
             model = IsolationForest(random_state=42)
+            # We'll train a basic model without the categorical data for now
+            # as the current IsolationForest model doesn't handle strings directly.
             model.fit(df[['temperature', 'pressure', 'vibration', 'humidity']])
             # Save the new model
             joblib.dump(model, "isolation_forest_model.joblib")
@@ -50,18 +49,28 @@ model, df = load_model_and_data()
 
 # --- User Input Form ---
 with st.form("anomaly_prediction_form"):
-    st.subheader("Enter Equipment Sensor Readings")
+    st.subheader("Enter Equipment Details and Sensor Readings")
+    
+    # Define a list of locations and equipment types
+    locations = ["Kasua", "Tema", "Wineba", "Osu", "Kumasi"]
+    equipment_types = ["Turbine", "Pump", "Compressor", "Microplate Shaker"]
+
+    # Add dropdown menus for location and equipment type
+    location = st.selectbox("Equipment Location", options=locations)
+    equipment_type = st.selectbox("Equipment Type", options=equipment_types)
+
+    # Add number inputs for sensor readings
     temperature = st.number_input(
-        "Temperature (°C)", min_value=0.0, max_value=100.0, value=df['temperature'].mean()
+        "Temperature (°C)", min_value=0.0, max_value=100.0, value=float(df['temperature'].mean())
     )
     pressure = st.number_input(
-        "Pressure (kPa)", min_value=0.0, max_value=100.0, value=df['pressure'].mean()
+        "Pressure (kPa)", min_value=0.0, max_value=100.0, value=float(df['pressure'].mean())
     )
     vibration = st.number_input(
-        "Vibration (mm/s)", min_value=0.0, max_value=10.0, value=df['vibration'].mean()
+        "Vibration (mm/s)", min_value=0.0, max_value=10.0, value=float(df['vibration'].mean())
     )
     humidity = st.number_input(
-        "Humidity (%)", min_value=0.0, max_value=100.0, value=df['humidity'].mean()
+        "Humidity (%)", min_value=0.0, max_value=100.0, value=float(df['humidity'].mean())
     )
 
     # Every form must have a submit button.
@@ -86,10 +95,10 @@ if submit_button:
 
     # Display the result
     if prediction[0] == -1:
-        st.error("⚠️ **Prediction:** Anomaly Detected")
+        st.error(f"⚠️ **Prediction for {equipment_type} at {location}:** Anomaly Detected")
         st.write("The entered sensor readings are outside the normal range for this equipment.")
     else:
-        st.success("✅ **Prediction:** No Anomaly Detected")
+        st.success(f"✅ **Prediction for {equipment_type} at {location}:** No Anomaly Detected")
         st.write("The entered sensor readings are within the normal operating range.")
 
 # --- Footer ---
