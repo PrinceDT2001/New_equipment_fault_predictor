@@ -1,123 +1,97 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+from sklearn.ensemble import IsolationForest
+import joblib
 
-# Set the page configuration
-# This must be the first Streamlit command in your script.
+# Set page configuration for a better look and feel
 st.set_page_config(
-    page_title="Equipment Anomaly Dashboard",
-    page_icon="🔧",
-    layout="wide",
-    initial_sidebar_state="expanded"
+    page_title="Equipment Anomaly Predictor",
+    page_icon="⚙️",
+    layout="centered",
 )
 
-# --- Load and Prepare Data ---
-@st.cache_data
-def load_data(file_path):
+# --- App Title and Description ---
+st.title("⚙️ Equipment Anomaly Predictor")
+st.markdown("### Predict equipment faults based on sensor readings")
+st.markdown(
     """
-    Loads the equipment anomaly data from a CSV file.
-    st.cache_data ensures the data is only loaded once.
+This application uses a trained Isolation Forest model to predict if an equipment reading is anomalous.
+Enter the sensor data below to get a prediction.
+"""
+)
+
+# --- Load the trained model and data ---
+@st.cache_resource
+def load_model_and_data():
+    """
+    Loads the trained Isolation Forest model and the data.
     """
     try:
-        df = pd.read_csv(file_path)
-        return df
+        model = joblib.load("isolation_forest_model.joblib")
+        # For simplicity, we'll retrain the model with the same data if it's not present.
+        # In a real-world scenario, you would have a separate training script.
+        df = pd.read_csv("equipment_anomaly_data.csv")
     except FileNotFoundError:
-        st.error(f"Error: The file '{file_path}' was not found.")
-        st.stop()
-        
-df = load_data("equipment_anomaly_data.csv")
+        st.error("Error: `isolation_forest_model.joblib` or `equipment_anomaly_data.csv` not found.")
+        st.info("Training a new model on the provided CSV data. This may take a moment.")
+        try:
+            df = pd.read_csv("equipment_anomaly_data.csv")
+            model = IsolationForest(random_state=42)
+            model.fit(df[['temperature', 'pressure', 'vibration', 'humidity']])
+            # Save the new model
+            joblib.dump(model, "isolation_forest_model.joblib")
+        except FileNotFoundError:
+            st.error("Error: `equipment_anomaly_data.csv` is missing. The app cannot run without the data file.")
+            st.stop()
+    return model, df
 
-# Ensure required columns exist
-required_columns = ['temperature', 'pressure', 'vibration', 'humidity', 'equipment', 'location', 'faulty']
-if not all(col in df.columns for col in required_columns):
-    st.error("The CSV file is missing one or more required columns.")
-    st.stop()
+model, df = load_model_and_data()
 
-# Convert the 'faulty' column to boolean
-df['faulty'] = df['faulty'].astype(bool)
-
-# --- Sidebar Filters ---
-with st.sidebar:
-    st.header("⚙️ Filter Data")
-    
-    # Filter by equipment type
-    equipment_types = df['equipment'].unique()
-    selected_equipment = st.selectbox(
-        "Select Equipment Type",
-        options=equipment_types,
-        index=0
+# --- User Input Form ---
+with st.form("anomaly_prediction_form"):
+    st.subheader("Enter Equipment Sensor Readings")
+    temperature = st.number_input(
+        "Temperature (°C)", min_value=0.0, max_value=100.0, value=df['temperature'].mean()
     )
-    
-    # Filter by location
-    locations = df['location'].unique()
-    selected_location = st.multiselect(
-        "Select Location(s)",
-        options=locations,
-        default=locations
+    pressure = st.number_input(
+        "Pressure (kPa)", min_value=0.0, max_value=100.0, value=df['pressure'].mean()
+    )
+    vibration = st.number_input(
+        "Vibration (mm/s)", min_value=0.0, max_value=10.0, value=df['vibration'].mean()
+    )
+    humidity = st.number_input(
+        "Humidity (%)", min_value=0.0, max_value=100.0, value=df['humidity'].mean()
     )
 
-    # Filter by temperature
-    temp_range = st.slider(
-        "Temperature Range (°C)",
-        min_value=float(df['temperature'].min()),
-        max_value=float(df['temperature'].max()),
-        value=(float(df['temperature'].min()), float(df['temperature'].max()))
+    # Every form must have a submit button.
+    submit_button = st.form_submit_button(
+        label="Predict Anomaly",
+        use_container_width=True,
     )
+
+# --- Prediction Logic ---
+if submit_button:
+    # Create a DataFrame from the user inputs
+    input_data = pd.DataFrame(
+        [[temperature, pressure, vibration, humidity]],
+        columns=['temperature', 'pressure', 'vibration', 'humidity']
+    )
+
+    # Make the prediction
+    prediction = model.predict(input_data)
     
-# Apply filters to the main dataframe
-filtered_df = df[
-    (df['equipment'] == selected_equipment) &
-    (df['location'].isin(selected_location)) &
-    (df['temperature'] >= temp_range[0]) &
-    (df['temperature'] <= temp_range[1])
-]
+    st.markdown("---")
+    st.subheader("Prediction Result")
 
-# --- Main Page Layout ---
-st.title("Equipment Anomaly Detection Dashboard")
-st.markdown("This dashboard provides an overview of equipment sensor data and potential anomalies.")
+    # Display the result
+    if prediction[0] == -1:
+        st.error("⚠️ **Prediction:** Anomaly Detected")
+        st.write("The entered sensor readings are outside the normal range for this equipment.")
+    else:
+        st.success("✅ **Prediction:** No Anomaly Detected")
+        st.write("The entered sensor readings are within the normal operating range.")
 
-# Use st.columns to create a flexible, horizontal layout
-col1, col2, col3 = st.columns(3)
-
-# Display key metrics using st.metric
-with col1:
-    total_data_points = len(filtered_df)
-    st.metric(label="Total Data Points", value=f"{total_data_points:,}")
-
-with col2:
-    faulty_count = filtered_df[filtered_df['faulty']].shape[0]
-    st.metric(label="Faulty Equipment", value=f"{faulty_count:,}")
-
-with col3:
-    fault_rate = (faulty_count / total_data_points) * 100 if total_data_points > 0 else 0
-    st.metric(label="Fault Rate", value=f"{fault_rate:.2f}%")
-
-st.divider()
-
-# --- Dataframe Display ---
-st.subheader("Raw Data")
-st.write("Displaying filtered data from the CSV file.")
-st.dataframe(filtered_df, use_container_width=True)
-
-st.divider()
-
-# --- Data Visualization ---
-st.subheader("Data Visualizations")
-
-# Create two columns for the charts
-chart_col1, chart_col2 = st.columns(2)
-
-with chart_col1:
-    st.write("Temperature and Pressure Trends")
-    st.line_chart(filtered_df[['temperature', 'pressure']])
-
-with chart_col2:
-    st.write("Vibration Distribution")
-    st.bar_chart(filtered_df['vibration'])
-
-# You can also add other components like a map
-st.subheader("Equipment Locations")
-# Note: For a map, you'd typically need latitude and longitude data.
-# This is just a placeholder to show the component.
-# This component expects a DataFrame with columns named 'latitude' and 'longitude'
-# st.map(filtered_df)
+# --- Footer ---
+st.markdown("---")
+st.info("Built with ❤️ using Streamlit")
